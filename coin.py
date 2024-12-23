@@ -3,18 +3,17 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 import logging
-import asyncio
-import websockets
 import threading
 import time
 from datetime import datetime
+import websocket
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
 proxy_port = 7890
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# 只配置错误日志
+logging.basicConfig(level=logging.ERROR)
 
 # Session with connection pooling
 session = requests.Session()
@@ -29,53 +28,67 @@ proxies = {
 ws_connections = {}
 ws_messages = {}
 ws_last_keepalive = {}
-WS_TIMEOUT = 10  # 10秒超时
+WS_TIMEOUT = 10
 
-async def handle_websocket(url, message, key, merge, merge_key):
-    try:
-        async with websockets.connect(url) as websocket:
-            # 存储连接
-            ws_connections[key] = websocket
-            ws_messages[key] = None
-            ws_last_keepalive[key] = time.time()
-            
-            # 发送初始消息
-            await websocket.send(message)
-            
-            # 监听消息
-            while True:
-                if time.time() - ws_last_keepalive[key] > WS_TIMEOUT:
-                    logging.info(f"WebSocket {key} timeout, closing connection")
-                    break
-                
-                try:
-                    message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
-                    if merge:
-                       message = find_value_by_key(message, merge_key)
-                       if message:
-                           if ws_messages[key]:
-                               if isinstance(ws_messages[key], list):
-                                   ws_messages[key].extend(message)
-                               else:
-                                   ws_messages[key].update(message)
-                           else:
-                               ws_messages[key] = message
+def handle_websocket(url, message, key, merge, merge_key):
+    def on_message(ws, message):
+        try:
+            if merge:
+                data = find_value_by_key(message, merge_key)
+                if data:
+                    if ws_messages[key]:
+                        if isinstance(ws_messages[key], list):
+                            ws_messages[key].extend(data)
+                        else:
+                            ws_messages[key].update(data)
                     else:
-                        ws_messages[key] = message
-                except asyncio.TimeoutError:
-                    continue
-                except Exception as e:
-                    logging.error(f"WebSocket error: {e}")
-                    break
-                    
-    except Exception as e:
-        logging.error(f"WebSocket connection error: {e}")
-    finally:
-        # 清理连接
+                        ws_messages[key] = data
+            else:
+                ws_messages[key] = message
+        except Exception as e:
+            logging.error(f"Message handling error: {e}")
+
+    def on_error(ws, error):
+        logging.error(f"WebSocket error: {error}")
+
+    def on_close(ws, close_status_code, close_msg):
         if key in ws_connections:
             del ws_connections[key]
         if key in ws_last_keepalive:
             del ws_last_keepalive[key]
+
+    def on_open(ws):
+        ws.send(message)
+
+    def check_timeout():
+        while True:
+            time.sleep(1)
+            if key not in ws_last_keepalive:
+                break
+            if time.time() - ws_last_keepalive[key] > WS_TIMEOUT:
+                ws.close()
+                break
+
+    # 创建 WebSocket 连接
+    ws = websocket.WebSocketApp(
+        url,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close,
+        on_open=on_open
+    )
+    
+    ws_connections[key] = ws
+    ws_messages[key] = None
+    ws_last_keepalive[key] = time.time()
+
+    # 启动超时检查线程
+    timeout_thread = threading.Thread(target=check_timeout)
+    timeout_thread.daemon = True
+    timeout_thread.start()
+
+    # 运行 WebSocket
+    ws.run_forever()
 
 def send_request(data):
     url = data.get('u')
@@ -105,8 +118,6 @@ def options():
 @app.route('/api/proxy', methods=['POST'])
 def proxy():
     data = request.get_json()
-    logging.info(f"Received data: {data}")
-
     response, error, status_code = send_request(data)
     if error:
         return jsonify({"error": error}), status_code
@@ -137,15 +148,13 @@ def connect_websocket():
     if not all([url, message, key]):
         return jsonify({"error": "Missing required parameters"}), 400
     
-    # 如果已存在相同key的连接,先关闭它
     if key in ws_connections:
         return jsonify({"error": "Connection with this key already exists"}), 400
     
-    # 在新线程中启动WebSocket连接
-    def run_async():
-        asyncio.run(handle_websocket(url, message, key, merge, merge_key))
-    
-    thread = threading.Thread(target=run_async)
+    thread = threading.Thread(
+        target=handle_websocket,
+        args=(url, message, key, merge, merge_key)
+    )
     thread.daemon = True
     thread.start()
     
@@ -156,15 +165,16 @@ def get_ws_message(key):
     if key not in ws_messages:
         return jsonify({"error": "No messages found for this key"}), 404
     
-    return ws_messages[key]
+    try:
+        return jsonify(ws_messages[key]), 200
+    except Exception as e:
+        return jsonify({"error": f"获取消息失败: {str(e)}"}), 500
 
 @app.route('/api/ws/all', methods=['GET'])
 def get_ws_all():
-    return jsonify(ws_connections.keys())
-
+    return jsonify(list(ws_connections.keys()))
 
 @app.route('/api/ws/keepalive/<key>', methods=['POST'])
-
 def keepalive_ws(key):
     if key not in ws_connections:
         return jsonify({"error": "No active connection found for this key"}), 404
@@ -172,9 +182,10 @@ def keepalive_ws(key):
     ws_last_keepalive[key] = time.time()
     return jsonify({"message": "Keepalive successful"}), 200
 
-
 def find_value_by_key(json_obj, target_key):
-    json_obj = json.loads(json_obj)
+    if isinstance(json_obj, str):
+        json_obj = json.loads(json_obj)
+        
     def _search(obj):
         if isinstance(obj, dict):
             for key, value in obj.items():
@@ -195,4 +206,5 @@ def find_value_by_key(json_obj, target_key):
     return _search(json_obj)
 
 if __name__ == '__main__':
+    websocket.enableTrace(False)  # 禁用 WebSocket 调试日志
     app.run(port=50888, threaded=True)
