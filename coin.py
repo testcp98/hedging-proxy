@@ -30,7 +30,7 @@ ws_messages = {}
 ws_last_keepalive = {}
 WS_TIMEOUT = 10
 
-def handle_websocket(url, message, key, merge, merge_key):
+def handle_websocket(url, message, key, merge, merge_key, item_key):
     def on_message(ws, message):
         try:
             if merge:
@@ -43,6 +43,8 @@ def handle_websocket(url, message, key, merge, merge_key):
                             ws_messages[key].update(data)
                     else:
                         ws_messages[key] = data
+                if item_key:
+                    ws_messages[key] = list({item[item_key]: item for item in ws_messages[key]}.values())
             else:
                 ws_messages[key] = message
         except Exception as e:
@@ -144,6 +146,7 @@ def connect_websocket():
     key = data.get('key')
     merge = data.get('merge')
     merge_key = data.get('merge_key')
+    item = data.get('item')
     
     if not all([url, message, key]):
         return jsonify({"error": "Missing required parameters"}), 400
@@ -153,7 +156,7 @@ def connect_websocket():
     
     thread = threading.Thread(
         target=handle_websocket,
-        args=(url, message, key, merge, merge_key)
+        args=(url, message, key, merge, merge_key, item)
     )
     thread.daemon = True
     thread.start()
