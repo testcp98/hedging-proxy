@@ -1,5 +1,5 @@
 import json
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 import requests
 import logging
@@ -10,6 +10,9 @@ import websocket
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+
+# 代理配置
+proxy_enabled = True
 proxy_port = 7890
 
 # 只配置错误日志
@@ -18,11 +21,34 @@ logging.basicConfig(level=logging.ERROR)
 # Session with connection pooling
 session = requests.Session()
 
-# Proxy configuration
-proxies = {
-    'http': f'http://127.0.0.1:{proxy_port}',
-    'https': f'http://127.0.0.1:{proxy_port}'
-}
+# 代理配置缓存
+_cached_proxies = None
+_last_proxy_enabled = None
+_last_proxy_port = None
+
+# 获取代理配置（带缓存）
+def get_proxies():
+    global _cached_proxies, _last_proxy_enabled, _last_proxy_port
+    
+    # 如果配置没有变化，直接返回缓存的代理配置
+    if (_last_proxy_enabled == proxy_enabled and 
+        _last_proxy_port == proxy_port and 
+        _cached_proxies is not None):
+        return _cached_proxies
+    
+    # 配置发生变化，更新缓存
+    _last_proxy_enabled = proxy_enabled
+    _last_proxy_port = proxy_port
+    
+    if proxy_enabled:
+        _cached_proxies = {
+            'http': f'http://127.0.0.1:{proxy_port}',
+            'https': f'http://127.0.0.1:{proxy_port}'
+        }
+    else:
+        _cached_proxies = None
+    
+    return _cached_proxies
 
 # 存储 WebSocket 连接和消息的字典
 ws_connections = {}
@@ -99,6 +125,7 @@ def send_request(data):
     headers = data.get('h')
 
     try:
+        proxies = get_proxies()
         if method == 'GET':
             response = session.get(url, headers=headers, proxies=proxies, timeout=5)
         elif method == 'POST':
@@ -108,6 +135,9 @@ def send_request(data):
             return None, "Unsupported HTTP method", 400
         return response, None, response.status_code
     except requests.exceptions.RequestException as e:
+        #输出堆栈
+        import traceback
+        traceback.print_exc()
         logging.error(f"Request failed: {e}")
         return None, str(e), 500
 
@@ -137,6 +167,262 @@ def proxy():
 @app.route('/api/get', methods=['GET'])
 def get():
     return jsonify({"message": "插件开启成功"})
+
+# 代理控制页面
+@app.route('/')
+def proxy_control():
+    html_template = """
+    <!DOCTYPE html>
+    <html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>代理控制面板</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                max-width: 600px;
+                margin: 50px auto;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }
+            .container {
+                background: white;
+                padding: 30px;
+                border-radius: 10px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }
+            h1 {
+                color: #333;
+                text-align: center;
+                margin-bottom: 30px;
+            }
+            .form-group {
+                margin-bottom: 20px;
+            }
+            label {
+                display: block;
+                margin-bottom: 8px;
+                font-weight: 500;
+                color: #555;
+            }
+            input[type="number"] {
+                width: 100%;
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                font-size: 16px;
+                box-sizing: border-box;
+            }
+            .checkbox-group {
+                display: flex;
+                align-items: center;
+                margin-bottom: 20px;
+            }
+            .checkbox-group input[type="checkbox"] {
+                margin-right: 10px;
+                transform: scale(1.2);
+            }
+            .btn {
+                background-color: #007bff;
+                color: white;
+                padding: 12px 24px;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+                font-size: 16px;
+                width: 100%;
+                margin-top: 10px;
+            }
+            .btn:hover {
+                background-color: #0056b3;
+            }
+            .status {
+                margin-top: 20px;
+                padding: 15px;
+                border-radius: 5px;
+                text-align: center;
+                font-weight: 500;
+            }
+            .status.success {
+                background-color: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+            }
+            .status.error {
+                background-color: #f8d7da;
+                color: #721c24;
+                border: 1px solid #f5c6cb;
+            }
+            .current-status {
+                background-color: #e9ecef;
+                padding: 15px;
+                border-radius: 5px;
+                margin-bottom: 20px;
+            }
+            .status-item {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 8px;
+            }
+            .status-value {
+                font-weight: bold;
+                color: #007bff;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>代理控制面板</h1>
+            
+            <div class="current-status">
+                <h3>当前状态</h3>
+                <div class="status-item">
+                    <span>代理状态:</span>
+                    <span class="status-value" id="currentEnabled">加载中...</span>
+                </div>
+                <div class="status-item">
+                    <span>代理端口:</span>
+                    <span class="status-value" id="currentPort">加载中...</span>
+                </div>
+            </div>
+
+            <form id="proxyForm">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="proxyEnabled" name="proxyEnabled">
+                    <label for="proxyEnabled">启用代理</label>
+                </div>
+                
+                <div class="form-group">
+                    <label for="proxyPort">代理端口:</label>
+                    <input type="number" id="proxyPort" name="proxyPort" min="1" max="65535" placeholder="请输入端口号">
+                </div>
+                
+                <button type="submit" class="btn">保存设置</button>
+            </form>
+            
+            <div id="statusMessage" class="status" style="display: none;"></div>
+        </div>
+
+        <script>
+            // 加载当前状态
+            function loadCurrentStatus() {
+                fetch('/api/proxy/status')
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById('currentEnabled').textContent = data.enabled ? '已启用' : '已禁用';
+                        document.getElementById('currentPort').textContent = data.port;
+                        document.getElementById('proxyEnabled').checked = data.enabled;
+                        document.getElementById('proxyPort').value = data.port;
+                    })
+                    .catch(error => {
+                        console.error('加载状态失败:', error);
+                        document.getElementById('currentEnabled').textContent = '加载失败';
+                        document.getElementById('currentPort').textContent = '加载失败';
+                    });
+            }
+
+            // 显示状态消息
+            function showMessage(message, isError = false) {
+                const statusDiv = document.getElementById('statusMessage');
+                statusDiv.textContent = message;
+                statusDiv.className = 'status ' + (isError ? 'error' : 'success');
+                statusDiv.style.display = 'block';
+                
+                setTimeout(() => {
+                    statusDiv.style.display = 'none';
+                }, 3000);
+            }
+
+            // 表单提交
+            document.getElementById('proxyForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const enabled = document.getElementById('proxyEnabled').checked;
+                const port = parseInt(document.getElementById('proxyPort').value);
+                
+                if (!port || port < 1 || port > 65535) {
+                    showMessage('请输入有效的端口号 (1-65535)', true);
+                    return;
+                }
+                
+                fetch('/api/proxy/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        enabled: enabled,
+                        port: port
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showMessage('设置保存成功！');
+                        loadCurrentStatus(); // 重新加载状态
+                    } else {
+                        showMessage('保存失败: ' + (data.error || '未知错误'), true);
+                    }
+                })
+                .catch(error => {
+                    console.error('保存失败:', error);
+                    showMessage('保存失败: ' + error.message, true);
+                });
+            });
+
+            // 页面加载时获取当前状态
+            loadCurrentStatus();
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html_template)
+
+# 获取代理状态API
+@app.route('/api/proxy/status', methods=['GET'])
+def get_proxy_status():
+    return jsonify({
+        "enabled": proxy_enabled,
+        "port": proxy_port
+    })
+
+# 设置代理配置API
+@app.route('/api/proxy/config', methods=['POST'])
+def set_proxy_config():
+    global proxy_enabled, proxy_port
+    
+    data = request.get_json()
+    enabled = data.get('enabled')
+    port = data.get('port')
+    
+    if enabled is None:
+        return jsonify({"success": False, "error": "缺少enabled参数"}), 400
+    
+    if port is None:
+        return jsonify({"success": False, "error": "缺少port参数"}), 400
+    
+    if not isinstance(port, int) or port < 1 or port > 65535:
+        return jsonify({"success": False, "error": "端口号必须在1-65535之间"}), 400
+    
+    try:
+        proxy_enabled = bool(enabled)
+        proxy_port = int(port)
+        
+        # 清除代理配置缓存，强制下次调用时重新生成
+        global _cached_proxies, _last_proxy_enabled, _last_proxy_port
+        _cached_proxies = None
+        _last_proxy_enabled = None
+        _last_proxy_port = None
+        
+        return jsonify({
+            "success": True,
+            "message": "代理配置已更新",
+            "enabled": proxy_enabled,
+            "port": proxy_port
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": f"更新配置失败: {str(e)}"}), 500
 
 @app.route('/api/ws/connect', methods=['POST'])
 def connect_websocket():
