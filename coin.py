@@ -9,6 +9,12 @@ from datetime import datetime
 import websocket
 import lighter
 
+# 全局SSL配置 - 解决SSL连接问题
+import ssl
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+ssl._create_default_https_context = ssl._create_unverified_context
+
 app = Flask(__name__)
 CORS(app)
 

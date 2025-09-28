@@ -1,12 +1,47 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+import sys
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
+# 获取虚拟环境路径
+venv_path = os.path.join(os.getcwd(), '.venv')
+site_packages = os.path.join(venv_path, 'lib', f'python{sys.version_info.major}.{sys.version_info.minor}', 'site-packages')
+lighter_path = os.path.join(site_packages, 'lighter')
+
+# 手动指定 lighter 的动态库文件
+lighter_binaries = []
+if os.path.exists(lighter_path):
+    signers_path = os.path.join(lighter_path, 'signers')
+    if os.path.exists(signers_path):
+        for file in os.listdir(signers_path):
+            if file.endswith(('.dylib', '.so')):
+                src = os.path.join(signers_path, file)
+                dst = os.path.join('lighter', 'signers', file)
+                lighter_binaries.append((src, dst))
+
+# 收集 lighter 库的数据文件
+lighter_data = collect_data_files('lighter')
 
 a = Analysis(
     ['coin.py'],
-    pathex=[],
-    binaries=[],
-    datas=[],
-    hiddenimports=[],
+    pathex=[venv_path],
+    binaries=lighter_binaries,
+    datas=lighter_data,
+    hiddenimports=[
+        'lighter', 
+        'lighter.signers', 
+        'lighter.api', 
+        'lighter.models',
+        'lighter.signer_client',
+        'lighter.ws_client',
+        'lighter.rest',
+        'lighter.configuration',
+        'lighter.nonce_manager',
+        'lighter.errors',
+        'lighter.exceptions',
+        'lighter.api_response',
+        'lighter.transactions'
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
