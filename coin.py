@@ -7,24 +7,45 @@ import threading
 import time
 from datetime import datetime
 import websocket
+import lighter
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+CORS(app)
 
 # 代理配置
 proxy_enabled = True
 proxy_port = 7890
 
-# 只配置错误日志
+# 只配置错误日志，关闭所有debug信息
 logging.basicConfig(level=logging.ERROR)
+
+# 关闭各个模块的debug日志
+logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
+logging.getLogger('werkzeug').setLevel(logging.WARNING)
+logging.getLogger('asyncio').setLevel(logging.WARNING)
+logging.getLogger('aiohttp').setLevel(logging.WARNING)
+logging.getLogger('root').setLevel(logging.WARNING)
+logging.getLogger().setLevel(logging.WARNING)
+
+# 禁用所有DEBUG级别的日志
+import logging
+logging.disable(logging.DEBUG)
 
 # Session with connection pooling
 session = requests.Session()
+API_KEY_PRIVATE_KEY = None
+ACCOUNT_INDEX = None
+API_KEY_INDEX = None
+LIGHTER_BASE_URL = 'https://mainnet.zklighter.elliot.ai'
 
+
+lighter_cache = {}
 # 代理配置缓存
 _cached_proxies = None
 _last_proxy_enabled = None
 _last_proxy_port = None
+# lighter_init 调用频率限制
+_last_lighter_init_call = 0
 
 # 获取代理配置（带缓存）
 def get_proxies():
@@ -142,11 +163,6 @@ def send_request(data):
         return None, str(e), 500
 
 
-@app.route('/api/proxy', methods=['OPTIONS'])
-def options():
-    return '', 204
-
-
 @app.route('/api/proxy', methods=['POST'])
 def proxy():
     data = request.get_json()
@@ -167,6 +183,32 @@ def proxy():
 @app.route('/api/get', methods=['GET'])
 def get():
     return jsonify({"message": "插件开启成功"})
+
+@app.route('/api/proxy/lighter/<type>', methods=['GET', 'POST'])
+async def lighter_proxy(type):
+    data = request.get_json()
+    if type == 'init':
+        # 检查10秒内是否已经调用过
+        global _last_lighter_init_call
+        current_time = time.time()
+        if current_time - _last_lighter_init_call < 10:
+            return jsonify({"message": "插件开启成功"}), 200
+        try:
+            result = lighter_init(data)
+            _last_lighter_init_call = current_time  
+            return jsonify(result)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    elif type == 'order':
+        try:
+            result = await lighter_order(data)
+            return jsonify(result)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": str(e)}), 500
+    else:
+        return jsonify({"message": "插件开启成功"})
 
 # 代理控制页面
 @app.route('/')
@@ -493,6 +535,44 @@ def find_value_by_key(json_obj, target_key):
         return None
     
     return _search(json_obj)
+
+def lighter_init(data):
+    global API_KEY_PRIVATE_KEY, ACCOUNT_INDEX, API_KEY_INDEX
+    API_KEY_PRIVATE_KEY = data.get('private_key')
+    ACCOUNT_INDEX = int(data.get('account_index'))
+    API_KEY_INDEX = int(data.get('api_key_index'))
+    return {
+        'message': '插件开启成功'
+    }
+async def lighter_order(data):
+    
+    lighter_client = lighter.SignerClient(
+        url=LIGHTER_BASE_URL,
+        private_key=API_KEY_PRIVATE_KEY,
+        account_index=ACCOUNT_INDEX,
+        api_key_index=API_KEY_INDEX,
+    )
+    tx = await lighter_client.create_market_order(
+        market_index=data.get('market_index'),
+        client_order_index=int(time.time()*1000),
+        base_amount=data.get('base_amount'),
+        avg_execution_price=data.get('avg_execution_price'),
+        is_ask=data.get('is_ask'),
+    )
+    await lighter_client.close()
+    # 检查交易是否成功
+    if tx[1] and hasattr(tx[1], 'tx_hash') and tx[1].tx_hash:
+        # 成功：返回交易哈希
+        return {'tx': tx[1].tx_hash}
+    elif tx[2]:
+        # 失败：返回错误信息
+        return {'error': tx[2]}
+    else:
+        # 其他情况：返回默认错误
+        return {'error': '交易失败，未知错误'}
+
+
+
 
 if __name__ == '__main__':
     websocket.enableTrace(False)  # 禁用 WebSocket 调试日志
