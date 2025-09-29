@@ -9,12 +9,6 @@ from datetime import datetime
 import websocket
 import lighter
 
-# 全局SSL配置 - 解决SSL连接问题
-import ssl
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-ssl._create_default_https_context = ssl._create_unverified_context
-
 app = Flask(__name__)
 CORS(app)
 
@@ -72,6 +66,7 @@ def get_proxies():
             'http': f'http://127.0.0.1:{proxy_port}',
             'https': f'http://127.0.0.1:{proxy_port}'
         }
+        lighter.api_client.configuration.proxy = _cached_proxies
     else:
         _cached_proxies = None
     
@@ -558,6 +553,7 @@ async def lighter_order(data):
         account_index=ACCOUNT_INDEX,
         api_key_index=API_KEY_INDEX,
     )
+
     tx = await lighter_client.create_market_order(
         market_index=data.get('market_index'),
         client_order_index=int(time.time()*1000),
