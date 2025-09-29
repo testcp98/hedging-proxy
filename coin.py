@@ -66,7 +66,6 @@ def get_proxies():
             'http': f'http://127.0.0.1:{proxy_port}',
             'https': f'http://127.0.0.1:{proxy_port}'
         }
-        lighter.api_client.configuration.proxy = _cached_proxies
     else:
         _cached_proxies = None
     
