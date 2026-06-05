@@ -1,0 +1,12 @@
+FROM scratch
+
+COPY --chmod=755 coin-go-linux /coin-go
+COPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+ENV PORT=50888
+ENV PROXY_ENABLED=false
+ENV PROXY_HOST=host.docker.internal
+
+EXPOSE 50888
+
+ENTRYPOINT ["/coin-go"]

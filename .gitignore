@@ -59,4 +59,9 @@ local_settings.py
 
 # 操作系统生成的文件
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Go 编译产物
+coin-go/coin-go
+coin-go/coin-go-linux
+coin-go/ca-certificates.crt

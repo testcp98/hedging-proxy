@@ -1,0 +1,44 @@
+name: Docker
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Build binary
+        working-directory: coin-go
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o coin-go-linux .
+          cp /etc/ssl/certs/ca-certificates.crt ca-certificates.crt
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: coin-go
+          file: coin-go/Dockerfile.scratch
+          push: true
+          tags: |
+            ghcr.io/testcp98/coin-go:latest
+            ghcr.io/testcp98/coin-go:${{ github.ref_name }}

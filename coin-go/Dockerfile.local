@@ -1,0 +1,18 @@
+# 本地已编译二进制时使用（无需拉取 golang 镜像）
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata wget
+
+WORKDIR /app
+COPY coin-go-linux /app/coin-go
+
+ENV PORT=50888
+ENV PROXY_ENABLED=false
+ENV PROXY_HOST=host.docker.internal
+
+EXPOSE 50888
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:50888/api/get || exit 1
+
+ENTRYPOINT ["/app/coin-go"]
