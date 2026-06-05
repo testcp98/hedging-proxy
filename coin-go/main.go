@@ -8,24 +8,21 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	lightersvc "github.com/testcp98/coin-go/internal/lighter"
-	"github.com/testcp98/coin-go/internal/config"
 	"github.com/testcp98/coin-go/internal/ws"
 )
 
 type Server struct {
-	proxy   *config.ProxyConfig
 	client  *http.Client
 	ws      *ws.Manager
 	lighter *lightersvc.Service
 }
 
 func main() {
-	proxyCfg := config.NewProxyConfig()
 	srv := &Server{
-		proxy:   proxyCfg,
-		client:  config.NewHTTPClient(proxyCfg),
+		client:  newDirectHTTPClient(),
 		ws:      ws.NewManager(),
 		lighter: lightersvc.NewService(),
 	}
@@ -47,8 +44,7 @@ func main() {
 		port = "50888"
 	}
 
-	enabled, _ := proxyCfg.Status()
-	log.Printf("coin-go listening on :%s (proxy enabled=%v)", port, enabled)
+	log.Printf("coin-go listening on :%s", port)
 
 	server := &http.Server{
 		Addr:    ":" + port,
@@ -68,6 +64,19 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func newDirectHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			Proxy:               nil, // PROXY功能已移除：始终直连
+			MaxIdleConns:        200,
+			MaxIdleConnsPerHost: 100,
+			MaxConnsPerHost:     100,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -166,8 +175,8 @@ func (s *Server) proxyStatus(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	enabled, port := s.proxy.Status()
-	writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": enabled, "port": port})
+	// PROXY功能已移除：始终返回禁用
+	writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": false, "port": 7890})
 }
 
 func (s *Server) proxyConfig(w http.ResponseWriter, r *http.Request) {
@@ -196,14 +205,11 @@ func (s *Server) proxyConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "端口号必须在1-65535之间"})
 		return
 	}
-
-	s.proxy.Update(*data.Enabled, *data.Port)
-	s.client = config.NewHTTPClient(s.proxy)
-
+	// 仍保留该接口以兼容老版本调用，但不再生效。
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
-		"message": "代理配置已更新",
-		"enabled": *data.Enabled,
+		"message": "PROXY功能已移除，当前始终直连（配置已忽略）",
+		"enabled": false,
 		"port":    *data.Port,
 	})
 }
@@ -350,16 +356,16 @@ const controlHTML = `<!DOCTYPE html>
 <body>
     <div class="container">
         <h1>代理控制面板</h1>
-        <div class="docker-note">Docker 模式默认直连网络，无需本地代理。如需使用宿主机代理，请启用并设置端口（如 7890），代理地址为 host.docker.internal。</div>
+        <div class="docker-note">PROXY功能已移除：当前始终直连网络。</div>
         <div class="current-status">
             <h3>当前状态</h3>
             <div class="status-item"><span>代理状态:</span><span class="status-value" id="currentEnabled">加载中...</span></div>
             <div class="status-item"><span>代理端口:</span><span class="status-value" id="currentPort">加载中...</span></div>
         </div>
         <form id="proxyForm">
-            <div class="checkbox-group"><input type="checkbox" id="proxyEnabled"><label for="proxyEnabled">启用代理</label></div>
-            <div class="form-group"><label for="proxyPort">代理端口:</label><input type="number" id="proxyPort" min="1" max="65535" placeholder="请输入端口号"></div>
-            <button type="submit" class="btn">保存设置</button>
+            <div class="checkbox-group"><input type="checkbox" id="proxyEnabled" disabled><label for="proxyEnabled">启用代理（已移除）</label></div>
+            <div class="form-group"><label for="proxyPort">代理端口:</label><input type="number" id="proxyPort" min="1" max="65535" placeholder="请输入端口号" disabled></div>
+            <button type="submit" class="btn" disabled>保存设置</button>
         </form>
         <div id="statusMessage" class="status" style="display: none;"></div>
     </div>

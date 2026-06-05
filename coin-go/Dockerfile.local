@@ -7,8 +7,6 @@ WORKDIR /app
 COPY coin-go-linux /app/coin-go
 
 ENV PORT=50888
-ENV PROXY_ENABLED=false
-ENV PROXY_HOST=host.docker.internal
 
 EXPOSE 50888
 

@@ -17,8 +17,6 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifi
 COPY --from=builder --chmod=755 /coin-go /coin-go
 
 ENV PORT=50888
-ENV PROXY_ENABLED=false
-ENV PROXY_HOST=host.docker.internal
 
 EXPOSE 50888
 

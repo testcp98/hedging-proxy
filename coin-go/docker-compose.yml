@@ -6,8 +6,6 @@ services:
       - "50888:50888"
     environment:
       PORT: "50888"
-      PROXY_ENABLED: "false"
-      PROXY_HOST: "host.docker.internal"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

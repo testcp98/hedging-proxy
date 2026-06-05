@@ -34,16 +34,14 @@ docker compose up -d
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `PORT` | `50888` | 服务端口 |
-| `PROXY_ENABLED` | `false` | 是否启用 HTTP 代理 |
-| `PROXY_PORT` | `7890` | 代理端口 |
-| `PROXY_HOST` | `host.docker.internal` | 代理主机（Docker 内访问宿主机代理） |
+| 无 | - | 本镜像已移除本地 HTTP PROXY 功能，默认始终直连网络。 |
 
 ## 本地编译
 
 ```bash
 cd coin-go
 GOTOOLCHAIN=go1.23.0 go build -o coin-go .
-PROXY_ENABLED=false ./coin-go
+./coin-go
 ```
 
 ## 构建并推送镜像
