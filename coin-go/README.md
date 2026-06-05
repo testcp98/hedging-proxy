@@ -17,7 +17,7 @@ Go 语言重写版 coin 插件服务，与 Python 版 `coin.py` API 完全兼容
 docker run -d --name coin-go \
   -p 50888:50888 \
   --restart unless-stopped \
-  ghcr.io/testcp98/coin-go:latest
+  testcp98/coin-go:latest
 ```
 
 或使用 docker-compose：
@@ -52,10 +52,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o coin-go-linux
 cp /etc/ssl/cert.pem ca-certificates.crt
 
 # 构建镜像（无需拉取基础镜像）
-docker build -f Dockerfile.scratch -t ghcr.io/testcp98/coin-go:latest .
+docker build -f Dockerfile.scratch -t testcp98/coin-go:latest .
 
-# 推送（需先 docker login ghcr.io）
-docker push ghcr.io/testcp98/coin-go:latest
+# 推送（需先 docker login）
+docker push testcp98/coin-go:latest
 ```
 
 ## 与 Python 版的差异

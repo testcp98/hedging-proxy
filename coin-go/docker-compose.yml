@@ -1,6 +1,6 @@
 services:
   coin-go:
-    image: ghcr.io/testcp98/coin-go:latest
+    image: testcp98/coin-go:latest
     build: .
     ports:
       - "50888:50888"
